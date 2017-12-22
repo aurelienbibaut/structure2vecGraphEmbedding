@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 def Q_func(x, adj, w, p, T, initialization_stddev,
-           scope, reuse=False, n_mlp_layers = 1):
+           scope, reuse=False, pre_pooling_mlp_layers = 1, post_pooling_mlp_layers = 1):
     """
     x:      B x n_vertices.
     Placeholder for the current state of the solution.
@@ -23,18 +23,22 @@ def Q_func(x, adj, w, p, T, initialization_stddev,
             theta7 = tf.Variable(tf.random_normal([p, p], stddev=initialization_stddev), name='theta7')
 
 
-        with tf.variable_scope('MLP', reuse=False):
-            Ws_MLP = []; bs_MLP = []
-            for i in range(n_mlp_layers):
-                Ws_MLP.append(tf.Variable(tf.random_normal([p, p], stddev=initialization_stddev),
-                                          name='W_MLP_' + str(i)))
-                bs_MLP.append(tf.Variable(tf.random_normal([p], stddev=initialization_stddev),
-                                          name='b_MLP_' + str(i)))
+        with tf.variable_scope('pre_pooling_MLP', reuse=False):
+            Ws_pre_pooling = []; bs_pre_pooling = []
+            for i in range(pre_pooling_mlp_layers):
+                Ws_pre_pooling.append(tf.Variable(tf.random_normal([p, p], stddev=initialization_stddev),
+                                          name='W_MLP_pre_pooling_' + str(i)))
+                bs_pre_pooling.append(tf.Variable(tf.random_normal([p], stddev=initialization_stddev),
+                                          name='b_MLP_pre_pooling_' + str(i)))
+
+            Ws_post_pooling = []; bs_post_pooling = []
+            for i in range(post_pooling_mlp_layers):
+                Ws_post_pooling.append(tf.Variable(tf.random_normal([p, p], stddev=initialization_stddev),
+                                          name='W_MLP_post_pooling_' + str(i)))
+                bs_post_pooling.append(tf.Variable(tf.random_normal([p], stddev=initialization_stddev),
+                                          name='b_MLP_post_pooling_' + str(i)))
 
         # Define the mus
-        # Initial mu
-        # mu = tf.einsum('iv,k->ivk', x, theta1)
-        # mu = tf.zeros(
         # Loop over t
         for t in range(T):
             # First part of mu
@@ -42,12 +46,16 @@ def Q_func(x, adj, w, p, T, initialization_stddev,
 
             # Second part of mu
             if t != 0:
+                # Add some non linear transformation of the neighbors' embedding before pooling
+                with tf.variable_scope('pre_pooling_MLP', reuse=False):
+                    for i in range(pre_pooling_mlp_layers):
+                        mu = tf.nn.relu(tf.einsum('kl,ivk->ivl', Ws_pre_pooling[i], mu) + bs_pre_pooling[i])
+
                 mu_part2 = tf.einsum('kl,ivk->ivl', theta2, tf.einsum('ivu,iuk->ivk', adj, mu))
                 # Add some non linear transformations of the pooled neighbors' embeddings
-                with tf.variable_scope('MLP', reuse=False):
-                    for i in range(n_mlp_layers):
-                        mu_part2 = tf.nn.relu(tf.einsum('kl,ivk->ivl', Ws_MLP[i], mu_part2) +
-                                              bs_MLP[i])
+                with tf.variable_scope('post_pooling_MLP', reuse=False):
+                    for i in range(post_pooling_mlp_layers):
+                        mu_part2 = tf.nn.relu(tf.einsum('kl,ivk->ivl', Ws_post_pooling[i], mu_part2) + bs_post_pooling[i])
 
             # Third part of mu
             mu_part3_0 = tf.einsum('ikvu->ikv', tf.nn.relu(tf.einsum('k,ivu->ikvu', theta4, w)))
